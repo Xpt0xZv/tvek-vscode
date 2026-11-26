@@ -310,4 +310,22 @@ describe('mock-tvek-lsp stdio JSON-RPC 2.0 protocol compliance', () => {
       }
     }
   });
+
+  it('rejects unknown CLI flags such as --stdio with exit code 2', async () => {
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const mockPath = path.join(repoRoot, 'test', 'fixtures', 'mock-tvek-lsp.mjs');
+    const proc = spawn(process.execPath, [mockPath, 'server', '--max-size', '4096', '--stdio'], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: false,
+    });
+    let stderr = '';
+    proc.stderr.on('data', (c: Buffer) => {
+      stderr += c.toString('utf8');
+    });
+    const code = await new Promise<number | null>((resolve) => proc.once('exit', resolve));
+    assert.equal(code, 2);
+    assert.match(stderr, /Unknown option '--stdio'/);
+  });
 });

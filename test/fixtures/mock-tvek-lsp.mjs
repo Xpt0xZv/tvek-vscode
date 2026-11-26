@@ -3,7 +3,7 @@ import process from 'node:process';
 const VERSION = '0.1.4';
 
 const argv = process.argv.slice(2);
-if (argv.includes('--version') || argv.includes('-V')) {
+if (argv.length === 1 && (argv[0] === '--version' || argv[0] === '-V' || argv[0] === '-v')) {
   process.stdout.write(`tvek ${VERSION}\n`);
   process.exit(0);
 }
@@ -16,17 +16,26 @@ if (!isServerMode) {
 
 let cliMaxSize = 104_857_600;
 for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === '--max-size' && argv[i + 1]) {
+  const arg = argv[i];
+  if ((i === 0 && arg === 'server') || arg === '--lsp') {
+    continue;
+  }
+  if (arg === '--max-size' && argv[i + 1] && !argv[i + 1].startsWith('-')) {
     const parsed = Number.parseInt(argv[i + 1], 10);
     if (Number.isFinite(parsed) && parsed > 0) {
       cliMaxSize = parsed;
     }
     i += 1;
-  } else if (argv[i]?.startsWith('--max-size=')) {
-    const parsed = Number.parseInt(argv[i].slice('--max-size='.length), 10);
+  } else if (arg?.startsWith('--max-size=')) {
+    const parsed = Number.parseInt(arg.slice('--max-size='.length), 10);
     if (Number.isFinite(parsed) && parsed > 0) {
       cliMaxSize = parsed;
     }
+  } else {
+    process.stderr.write(
+      `error: Unknown option '${arg}'\n\nRun 'tvek --help' for usage information.\n`,
+    );
+    process.exit(2);
   }
 }
 

@@ -7,7 +7,6 @@ import {
   LanguageClient,
   RevealOutputChannelOn,
   Trace,
-  TransportKind,
   type CodeActionParams,
   type DocumentSelector as LspDocumentSelector,
   type ErrorHandler,
@@ -266,7 +265,6 @@ export class TvekClientManager {
     const serverOptions: ServerOptions = {
       command: resolvedBinary.command,
       args: serverArgs,
-      transport: TransportKind.stdio,
       options: {
         cwd: resolvedBinary.safeCwd,
         env: resolvedBinary.safeEnv,
@@ -274,12 +272,13 @@ export class TvekClientManager {
       },
     };
 
+    let hasStarted = false;
     const clientOptions: LanguageClientOptions = {
       documentSelector: TVEK_LSP_DOCUMENT_SELECTOR,
       outputChannel: this.outputChannel,
       revealOutputChannelOn: RevealOutputChannelOn.Never,
       initializationOptions: nextConfig.initOptions,
-      errorHandler: this.createErrorHandler(),
+      errorHandler: this.createErrorHandler(() => hasStarted),
       middleware: {
         workspace: {
           didChangeConfiguration: () => Promise.resolve(),
@@ -313,6 +312,7 @@ export class TvekClientManager {
     this.stoppingIntentionally = false;
     try {
       await nextClient.start();
+      hasStarted = true;
       await nextClient.setTrace(mapTraceLevel(nextConfig.traceServer));
 
       this.client = nextClient;
@@ -375,7 +375,7 @@ export class TvekClientManager {
     }
   }
 
-  private createErrorHandler(): ErrorHandler {
+  private createErrorHandler(hasStarted: () => boolean): ErrorHandler {
     return {
       error: (error, _message, count) => {
         this.logError(`LSP transport error (count=${count ?? 1}): ${error.message}`);
@@ -385,7 +385,7 @@ export class TvekClientManager {
         return { action: ErrorAction.Shutdown, handled: true };
       },
       closed: () => {
-        if (this.stoppingIntentionally || this.coordinator.isDisposed) {
+        if (!hasStarted() || this.stoppingIntentionally || this.coordinator.isDisposed) {
           return { action: CloseAction.DoNotRestart, handled: true };
         }
 
