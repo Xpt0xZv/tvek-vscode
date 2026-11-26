@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out-test/
+bundled/
+.vscode-test/
+release-assets/
+*.vsix
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
