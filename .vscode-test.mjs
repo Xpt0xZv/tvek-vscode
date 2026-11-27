@@ -1,4 +1,5 @@
 import { defineConfig } from '@vscode/test-cli';
+import { downloadAndUnzipVSCode } from '@vscode/test-electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +8,16 @@ const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const vscodeTestRoot = path.join(repoRoot, '.vscode-test');
 const e2eWorkspaceDir = path.join(vscodeTestRoot, 'workspace');
 fs.mkdirSync(e2eWorkspaceDir, { recursive: true });
+
+function resolveDarwinMacOsBin(macOsDir) {
+  if (!fs.existsSync(macOsDir)) return undefined;
+  for (const name of ['Code', 'Electron']) {
+    const candidate = path.join(macOsDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  const firstFile = fs.readdirSync(macOsDir, { withFileTypes: true }).find((e) => e.isFile());
+  return firstFile ? path.join(macOsDir, firstFile.name) : undefined;
+}
 
 function findCachedWorkspaceVsCode() {
   if (
@@ -22,20 +33,23 @@ function findCachedWorkspaceVsCode() {
         continue;
       }
       const dirPath = path.join(vscodeTestRoot, entry.name);
+      if (process.platform === 'darwin') {
+        const subDirs = fs
+          .readdirSync(dirPath, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && !d.name.endsWith('.app'))
+          .map((d) => path.join(dirPath, d.name));
+        for (const base of [dirPath, ...subDirs]) {
+          const found = resolveDarwinMacOsBin(
+            path.join(base, 'Visual Studio Code.app', 'Contents', 'MacOS'),
+          );
+          if (found) return found;
+        }
+        continue;
+      }
       const candidates =
         process.platform === 'win32'
           ? [path.join(dirPath, 'Code.exe')]
-          : process.platform === 'darwin'
-            ? [
-                path.join(
-                  dirPath,
-                  'Visual Studio Code.app',
-                  'Contents',
-                  'MacOS',
-                  'Electron',
-                ),
-              ]
-            : [path.join(dirPath, 'code')];
+          : [path.join(dirPath, 'code')];
       for (const candidate of candidates) {
         if (fs.existsSync(candidate)) {
           return candidate;
@@ -48,13 +62,19 @@ function findCachedWorkspaceVsCode() {
   return undefined;
 }
 
-const cachedVsCodePath = findCachedWorkspaceVsCode();
+let resolvedVsCodePath = findCachedWorkspaceVsCode();
+if (!resolvedVsCodePath && process.platform === 'darwin') {
+  const downloadedExecPath = await downloadAndUnzipVSCode({ cachePath: vscodeTestRoot });
+  resolvedVsCodePath = fs.existsSync(downloadedExecPath)
+    ? downloadedExecPath
+    : (resolveDarwinMacOsBin(path.dirname(downloadedExecPath)) ?? findCachedWorkspaceVsCode());
+}
 
 export default defineConfig({
   files: 'out-test/test/e2e/**/*.test.js',
   workspaceFolder: e2eWorkspaceDir,
-  ...(cachedVsCodePath
-    ? { useInstallation: { fromPath: cachedVsCodePath } }
+  ...(resolvedVsCodePath
+    ? { useInstallation: { fromPath: resolvedVsCodePath } }
     : {}),
   mocha: {
     ui: 'tdd',
