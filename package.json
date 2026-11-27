@@ -2,7 +2,7 @@
   "name": "tvek-vscode",
   "displayName": "tvek",
   "description": "Fast RFC 8259 JSON & JSONC linter, formatter, and Language Server powered by tvek.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "tvekVersion": "0.1.4",
   "publisher": "xpt0xzv",
   "license": "MIT OR Apache-2.0",
@@ -198,7 +198,7 @@
   "overrides": {
     "diff@>=6.0.0 <=8.0.2": ">=8.0.3",
     "glob@>=9.0.0 <=14.0.1": ">=14.0.2",
-    "minimatch@>=7.0.0 <=11.0.0": ">=11.0.1",
+    "minimatch@>=7.0.0 <10.0.0": ">=11.0.1",
     "serialize-javascript@<=7.1.2": ">=7.1.3"
   }
 }
