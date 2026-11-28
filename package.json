@@ -1,0 +1,204 @@
+{
+  "name": "tvek-vscode",
+  "displayName": "tvek",
+  "description": "Fast RFC 8259 JSON & JSONC linter, formatter, and Language Server powered by tvek.",
+  "version": "0.1.1",
+  "tvekVersion": "0.1.4",
+  "publisher": "xpt0xzv",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Xpt0xZv/tvek-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Xpt0xZv/tvek-vscode/issues"
+  },
+  "homepage": "https://github.com/Xpt0xZv/tvek-vscode#readme",
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=20.0.0"
+  },
+  "categories": [
+    "Linters",
+    "Formatters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "json",
+    "jsonc",
+    "tvek",
+    "linter",
+    "formatter",
+    "rfc8259",
+    "lsp"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:json",
+    "onLanguage:jsonc"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "restrictedConfigurations": [
+        "tvek.path",
+        "tvek.importStrategy"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "tvek.restartServer",
+        "title": "tvek: Restart Language Server"
+      },
+      {
+        "command": "tvek.fixAll",
+        "title": "tvek: Fix All Auto-Fixable JSON Syntax Issues"
+      },
+      {
+        "command": "tvek.showLogs",
+        "title": "tvek: Show Output Channel"
+      }
+    ],
+    "codeActions": [
+      {
+        "languages": [
+          "json",
+          "jsonc"
+        ],
+        "actions": [
+          {
+            "kind": "source.fixAll.tvek",
+            "title": "Fix all auto-fixable tvek issues",
+            "description": "Automatically repair fixable JSON/JSONC syntax issues detected by tvek."
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "tvek",
+      "properties": {
+        "tvek.enable": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Enable or disable the tvek JSON and JSONC language server."
+        },
+        "tvek.path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "scope": "machine-overridable",
+          "description": "Explicit filesystem path to the tvek executable. Ignored in untrusted workspaces."
+        },
+        "tvek.importStrategy": {
+          "type": "string",
+          "enum": [
+            "useBundled",
+            "fromEnvironment"
+          ],
+          "enumDescriptions": [
+            "Prefer the extension's bundled tvek binary, falling back to workspace .venv and PATH.",
+            "Prefer workspace .venv and PATH before falling back to the extension's bundled tvek binary."
+          ],
+          "default": "useBundled",
+          "scope": "window",
+          "description": "Order in which tvek-vscode searches for the tvek executable. Ignored in untrusted workspaces."
+        },
+        "tvek.sortKeys": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Sort object keys lexicographically during document formatting."
+        },
+        "tvek.strict": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Enforce strict RFC 8259 JSON by disallowing // and /* */ comments."
+        },
+        "tvek.structural": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Expand all non-empty arrays across multiple lines (forces lineWidth to 0)."
+        },
+        "tvek.lineWidth": {
+          "type": "number",
+          "default": 80,
+          "minimum": 0,
+          "maximum": 4096,
+          "scope": "window",
+          "description": "Maximum target line width for inline array compaction (0..=4096)."
+        },
+        "tvek.minify": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Format JSON documents into compact single-line output without insignificant whitespace."
+        },
+        "tvek.maxSize": {
+          "type": "number",
+          "default": 104857600,
+          "minimum": 1,
+          "maximum": 104857600,
+          "scope": "window",
+          "description": "Maximum document size in bytes accepted by tvek server (1..=104857600)."
+        },
+        "tvek.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "scope": "window",
+          "description": "Trace LSP JSON-RPC messages between VS Code and the tvek server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test scripts .vscode-test.mjs",
+    "check": "npm run typecheck && npm run lint",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test:unit": "npm run compile-tests && node --test \"out-test/test/unit/*.test.js\"",
+    "test:e2e": "npm run build && npm run compile-tests && vscode-test",
+    "test": "npm run test:unit && npm run test:e2e",
+    "fetch-binary": "node scripts/fetch-binary.mjs",
+    "package:vsix": "vsce package --no-dependencies --skip-license"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.24",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.3.2",
+    "esbuild": "^0.25.1",
+    "eslint": "^9.22.0",
+    "mocha": "^11.1.0",
+    "ovsx": "^0.10.1",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1"
+  },
+  "overrides": {
+    "diff@>=6.0.0 <=8.0.2": ">=8.0.3",
+    "glob@>=9.0.0 <=14.0.1": ">=14.0.2",
+    "minimatch@>=7.0.0 <10.0.0": ">=11.0.1",
+    "serialize-javascript@<=7.1.2": ">=7.1.3"
+  }
+}

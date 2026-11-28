@@ -1,0 +1,363 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release git tag to package and publish (e.g., v0.1.1)'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package VSIX (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        target:
+          - win32-x64
+          - win32-arm64
+          - darwin-x64
+          - darwin-arm64
+          - linux-x64
+          - linux-arm64
+          - alpine-x64
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          persist-credentials: false
+
+      - name: Validate release tag and package.json version alignment
+        shell: bash
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid SemVer release tag: ${TAG_NAME}"
+            exit 1
+          fi
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "v${pkg_version}" != "$TAG_NAME" ]; then
+            echo "::error::Git tag (${TAG_NAME}) does not match package.json version (v${pkg_version})."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies deterministically
+        shell: bash
+        run: npm ci
+
+      - name: Run typecheck, lint, and unit tests
+        shell: bash
+        run: |
+          npm run check
+          npm run test:unit
+
+      - name: Build extension bundle
+        shell: bash
+        run: npm run build
+
+      - name: Stage upstream tvek binary and package target VSIX
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p dist-vsix
+          pkg_version="$(node -p "require('./package.json').version")"
+          vsix_file="dist-vsix/tvek-vscode-${TARGET}-${pkg_version}.vsix"
+          node scripts/fetch-binary.mjs --target "$TARGET"
+          npx --no-install vsce package --no-dependencies --skip-license --target "$TARGET" -o "$vsix_file"
+          test -s "$vsix_file"
+          VSIX_CHECK_PATH="$vsix_file" TARGET_CHECK="$TARGET" node -e '
+            const yauzl = require("yauzl");
+            const vsixPath = process.env.VSIX_CHECK_PATH;
+            const target = process.env.TARGET_CHECK;
+            const expectedBin = target.startsWith("win32-")
+              ? "extension/bundled/bin/tvek.exe"
+              : "extension/bundled/bin/tvek";
+            yauzl.open(vsixPath, { lazyEntries: true }, (err, zip) => {
+              if (err) throw err;
+              const entries = new Set();
+              zip.readEntry();
+              zip.on("entry", (entry) => {
+                entries.add(entry.fileName);
+                zip.readEntry();
+              });
+              zip.on("end", () => {
+                for (const req of ["extension/dist/extension.js", "extension/package.json", expectedBin]) {
+                  if (!entries.has(req)) {
+                    console.error("Missing required VSIX entry:", req);
+                    process.exit(1);
+                  }
+                }
+                console.log("Verified target VSIX (" + entries.size + " entries): " + vsixPath);
+              });
+            });
+          '
+
+      - name: Upload target VSIX artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vsix-${{ matrix.target }}
+          path: dist-vsix/*.vsix
+          if-no-files-found: error
+          retention-days: 5
+
+  release:
+    name: GitHub Release & SHA256SUMS
+    needs:
+      - package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download all 7 target VSIX artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: vsix-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate and verify unified SHA256SUMS
+        shell: bash
+        run: |
+          cd release-assets
+          shopt -s nullglob
+          vsix_files=( *.vsix )
+          if [ "${#vsix_files[@]}" -ne 7 ]; then
+            echo "::error::Expected exactly 7 .vsix artifacts, found ${#vsix_files[@]}"
+            exit 1
+          fi
+          for expected_target in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64 alpine-x64; do
+            matches=( *"${expected_target}"*.vsix )
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::Missing or duplicate .vsix artifact for target ${expected_target}"
+              exit 1
+            fi
+          done
+          sha256sum *.vsix > SHA256SUMS
+          sha256sum --check --strict SHA256SUMS
+          line_count="$(wc -l < SHA256SUMS | tr -d '[:space:]')"
+          if [ "$line_count" -ne 7 ]; then
+            echo "::error::Expected 7 entries in SHA256SUMS, got ${line_count}"
+            exit 1
+          fi
+          cat SHA256SUMS
+
+      - name: Upload verified SHA256SUMS artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sha256sums
+          path: release-assets/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Generate SLSA build provenance attestations
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'release-assets/*.vsix'
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release tag format: ${TAG_NAME}"
+            exit 1
+          fi
+          prerelease_args=()
+          if [[ "$TAG_NAME" == *-* ]]; then
+            prerelease_args=(--prerelease)
+          fi
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" release-assets/*.vsix release-assets/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$TAG_NAME" release-assets/*.vsix release-assets/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG_NAME" \
+              --verify-tag \
+              --generate-notes \
+              "${prerelease_args[@]}"
+          fi
+
+  publish-marketplaces:
+    name: Publish to Marketplaces
+    needs:
+      - release
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install pinned CLI tools without lifecycle scripts
+        shell: bash
+        run: npm ci --ignore-scripts
+
+      - name: Download verified VSIX artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: vsix-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Download verified SHA256SUMS artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-sha256sums
+          path: release-assets
+
+      - name: Re-verify VSIX artifact SHA-256 digests before publishing
+        shell: bash
+        run: |
+          cd release-assets
+          shopt -s nullglob
+          vsix_files=( *.vsix )
+          if [ "${#vsix_files[@]}" -ne 7 ]; then
+            echo "::error::Expected exactly 7 .vsix artifacts, found ${#vsix_files[@]}"
+            exit 1
+          fi
+          line_count="$(wc -l < SHA256SUMS | tr -d '[:space:]')"
+          if [ "$line_count" -ne 7 ]; then
+            echo "::error::Expected 7 entries in SHA256SUMS, got ${line_count}"
+            exit 1
+          fi
+          sha256sum --check --strict SHA256SUMS
+
+      - name: Publish to VS Code Marketplace (OIDC)
+        if: ${{ vars.VSCE_ENABLE_OIDC == 'true' }}
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        run: |
+          shopt -s nullglob
+          vsix_files=( release-assets/*.vsix )
+          if [ "${#vsix_files[@]}" -ne 7 ]; then
+            echo "::error::Expected exactly 7 .vsix files in release-assets/, found ${#vsix_files[@]}"
+            exit 1
+          fi
+          if npx --no-install vsce publish --help 2>&1 | grep -q -- '--oidc'; then
+            npx --no-install vsce publish --oidc --skip-duplicate --packagePath "${vsix_files[@]}"
+          else
+            if [ -z "${AZURE_CLIENT_ID:-}" ] || [ -z "${AZURE_TENANT_ID:-}" ]; then
+              echo "::error::AZURE_CLIENT_ID and AZURE_TENANT_ID repository/environment variables are required for --azure-credential OIDC publishing."
+              exit 1
+            fi
+            if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+              echo "::error::GitHub OIDC token request environment variables are unavailable (ensure id-token: write permission is granted)."
+              exit 1
+            fi
+            umask 077
+            token_file="$(mktemp "${RUNNER_TEMP}/vsce-oidc.XXXXXX")"
+            chmod 600 "$token_file"
+            trap 'rm -f "$token_file"' EXIT
+            OIDC_TOKEN_FILE="$token_file" node -e '
+              const fs = require("node:fs");
+              (async () => {
+                const reqUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+                reqUrl.searchParams.set("audience", "api://AzureADTokenExchange");
+                const res = await fetch(reqUrl, {
+                  headers: {
+                    Authorization: "bearer " + process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+                    Accept: "application/json; api-version=2.0",
+                  },
+                  signal: AbortSignal.timeout(15000),
+                });
+                if (!res.ok) {
+                  throw new Error("GitHub OIDC token request failed with HTTP " + res.status);
+                }
+                const body = await res.json();
+                if (typeof body.value !== "string" || body.value.length === 0) {
+                  throw new Error("GitHub OIDC response did not contain a valid token string.");
+                }
+                fs.writeFileSync(process.env.OIDC_TOKEN_FILE, body.value, { mode: 0o600 });
+              })().catch((err) => {
+                console.error(err instanceof Error ? err.message : String(err));
+                process.exit(1);
+              });
+            '
+            export AZURE_FEDERATED_TOKEN_FILE="$token_file"
+            npx --no-install vsce publish --azure-credential --skip-duplicate --packagePath "${vsix_files[@]}"
+          fi
+
+      - name: Publish to VS Code Marketplace (PAT)
+        if: ${{ vars.VSCE_ENABLE_OIDC != 'true' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "${VSCE_PAT:-}" ]; then
+            echo "::notice::VSCE_PAT secret is not set (and VSCE_ENABLE_OIDC != true); skipping VS Code Marketplace publish."
+            exit 0
+          fi
+          shopt -s nullglob
+          vsix_files=( release-assets/*.vsix )
+          if [ "${#vsix_files[@]}" -ne 7 ]; then
+            echo "::error::Expected exactly 7 .vsix files in release-assets/, found ${#vsix_files[@]}"
+            exit 1
+          fi
+          # vsce reads VSCE_PAT directly from process.env.VSCE_PAT without exposing the token on argv.
+          npx --no-install vsce publish --skip-duplicate --packagePath "${vsix_files[@]}"
+
+      - name: Publish to Open VSX Registry
+        shell: bash
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "${OVSX_PAT:-}" ]; then
+            echo "::notice::OVSX_PAT secret is not set; skipping Open VSX publish."
+            exit 0
+          fi
+          shopt -s nullglob
+          vsix_files=( release-assets/*.vsix )
+          if [ "${#vsix_files[@]}" -ne 7 ]; then
+            echo "::error::Expected exactly 7 .vsix files in release-assets/, found ${#vsix_files[@]}"
+            exit 1
+          fi
+          # ovsx reads OVSX_PAT directly from process.env.OVSX_PAT without exposing the token on argv.
+          npx --no-install ovsx publish --skip-duplicate --packagePath "${vsix_files[@]}"

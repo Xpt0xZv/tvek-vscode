@@ -1,0 +1,98 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in the tvek VS Code extension
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue with `tvek-vscode`! If this is a security vulnerability, please do **not** open a public issue — report it privately via [GitHub Security Advisories](https://github.com/Xpt0xZv/tvek-vscode/security/advisories/new).
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: Concise one-sentence summary of the issue.
+      placeholder: Language server fails to restart after changing tvek.path
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction JSON / JSONC Input & Steps
+      description: Minimal JSON/JSONC document, extension settings (`settings.json`), and steps to reproduce.
+      render: jsonc
+      placeholder: |
+        {
+          // Paste minimal JSON/JSONC reproduction input or relevant tvek.* settings
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs Actual Behavior
+      description: Describe what you expected to happen and what actually occurred.
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: input
+    id: vscode_version
+    attributes:
+      label: VS Code Version
+      description: Output of `code --version` or Help -> About.
+      placeholder: 1.98.0
+    validations:
+      required: true
+
+  - type: input
+    id: tvek_version_source
+    attributes:
+      label: tvek Version & Binary Source
+      description: Shown in the VS Code Language Status bar when a JSON/JSONC file is focused (e.g., `0.1.4 (bundled)`).
+      placeholder: 0.1.4 (bundled)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os_arch
+    attributes:
+      label: OS & Architecture
+      description: Target platform and CPU architecture where VS Code / the extension host runs.
+      options:
+        - win32-x64
+        - win32-arm64
+        - darwin-arm64
+        - darwin-x64
+        - linux-x64
+        - linux-arm64
+        - alpine-x64
+        - Other (specify in logs/notes)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workspace_trust
+    attributes:
+      label: Workspace Trust State
+      description: Whether the workspace is running in Trusted mode or Restricted Mode.
+      options:
+        - Trusted
+        - Restricted Mode
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: tvek Output Channel Logs
+      description: "Run `tvek: Show Output Channel` from the Command Palette and paste any relevant log lines (redact private file paths if needed)."
+      render: text
+    validations:
+      required: false

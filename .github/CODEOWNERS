@@ -1,0 +1,11 @@
+# Default code owner for all repository files
+* @Xpt0xZv
+
+# Security-critical workflows, policies, binary fetcher, and package manifests
+/.github/ @Xpt0xZv
+/SECURITY.md @Xpt0xZv
+/package.json @Xpt0xZv
+/package-lock.json @Xpt0xZv
+/scripts/fetch-binary.mjs @Xpt0xZv
+/src/binary.ts @Xpt0xZv
+/src/config.ts @Xpt0xZv
