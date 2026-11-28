@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 import {
   BinaryResolutionError,
   buildServerArgs,
+  canonicalizeComparisonPath,
   isPathInsideOrEqual,
   parseTvekVersionOutput,
   resolveBinary,
@@ -634,6 +635,29 @@ describe('binary resolution & PATH / Workspace Trust security invariants', () =>
 
     const sanitized = sanitizePathEntries(rawPath, 'win32', [wsWin, uncShareWs], false);
     assert.deepEqual(sanitized, ['C:\\Program Files\\tvek']);
+  });
+
+  it('processes pathological 30,000-char space/dot segments in O(N) (<50ms) and rejects >32,767-char paths', () => {
+    const pathologicalSegment = `${' '.repeat(30_000)}x`;
+    const pathologicalWinPath = `C:\\${pathologicalSegment}`;
+    const pathologicalUncPath = `\\\\fileserver\\${' '.repeat(30_000)}x\\bin`;
+
+    const start = performance.now();
+    const normDrive = canonicalizeComparisonPath(pathologicalWinPath, 'win32');
+    const normUnc = canonicalizeComparisonPath(pathologicalUncPath, 'win32');
+    const elapsedMs = performance.now() - start;
+
+    assert.equal(normDrive, `C:\\${pathologicalSegment}`);
+    assert.equal(normUnc, pathologicalUncPath);
+    assert.ok(
+      elapsedMs < 50,
+      `Expected O(N) canonicalization in <50ms, took ${elapsedMs.toFixed(2)}ms`,
+    );
+
+    const overMaxWin = `C:\\${'a'.repeat(32_768)}`;
+    const overMaxPosix = `/${'a'.repeat(32_768)}`;
+    assert.equal(canonicalizeComparisonPath(overMaxWin, 'win32'), null);
+    assert.equal(canonicalizeComparisonPath(overMaxPosix, 'linux'), null);
   });
 
   it('probes the real mock-tvek-lsp.mjs fixture via child_process.execFile', async () => {

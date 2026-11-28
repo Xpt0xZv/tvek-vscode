@@ -222,6 +222,9 @@ export function parseSha256Sums(content) {
     if (line.length === 0 || line.startsWith('#')) {
       continue;
     }
+    if (line.length > 4096) {
+      throw new Error(`Malformed SHA256SUMS entry at line ${i + 1}: exceeds maximum line length.`);
+    }
     const match = /^([0-9a-fA-F]{64})\s+\*?([^\s/\\]+)$/.exec(line);
     if (!match) {
       throw new Error(`Malformed SHA256SUMS entry at line ${i + 1}: "${line}"`);

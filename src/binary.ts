@@ -133,6 +133,18 @@ function pathModuleFor(platform: NodeJS.Platform): path.PlatformPath {
   return platform === 'win32' ? path.win32 : path.posix;
 }
 
+function stripTrailingDotsAndSpaces(value: string): string {
+  let end = value.length;
+  while (end > 0) {
+    const code = value.charCodeAt(end - 1);
+    if (code !== 0x2e && code !== 0x20) {
+      break;
+    }
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
 function canonicalizeWin32FilesystemPath(unwrapped: string): string | null {
   const normalized = path.win32.normalize(unwrapped);
   const { root } = path.win32.parse(normalized);
@@ -150,7 +162,7 @@ function canonicalizeWin32FilesystemPath(unwrapped: string): string | null {
       return null;
     }
     const server = uncParts[0]!;
-    const share = uncParts[1]!.replace(/[. ]+$/g, '');
+    const share = stripTrailingDotsAndSpaces(uncParts[1]!);
     if (
       server.includes(':') ||
       share.includes(':') ||
@@ -178,7 +190,7 @@ function canonicalizeWin32FilesystemPath(unwrapped: string): string | null {
       return null;
     }
     // Win32 SearchPathW / CreateFileW strips trailing ASCII dots and spaces per segment
-    const stripped = seg.replace(/[. ]+$/g, '');
+    const stripped = stripTrailingDotsAndSpaces(seg);
     if (stripped.length === 0 || stripped === '.' || stripped === '..') {
       return null;
     }
@@ -199,13 +211,13 @@ export function canonicalizeComparisonPath(
   candidate: string,
   platform: NodeJS.Platform,
 ): string | null {
-  if (candidate.length === 0 || candidate.includes('\0')) {
+  if (candidate.length === 0 || candidate.length > 32_767 || candidate.includes('\0')) {
     return null;
   }
 
   if (platform === 'win32') {
     const extUncMatch =
-      /^(?:[\\/]{2}[.?]|\\\?\?)[\\/]unc[\\/]([^.\\/?][^\\/]*[\\/][^\\/]+.*)$/i.exec(
+      /^(?:[\\/]{2}[.?]|\\\?\?)[\\/]unc[\\/]([^.\\/?][^\\/]*[\\/][^\\/].*)$/i.exec(
         candidate,
       );
     if (extUncMatch?.[1]) {
@@ -224,7 +236,7 @@ export function canonicalizeComparisonPath(
     }
 
     // Require explicit drive root (`C:\` or `C:/`) or standard UNC share (`\\server\share`)
-    if (/^(?:[A-Za-z]:[\\/]|[\\/]{2}[^.\\/?][^\\/]*[\\/][^\\/]+)/.test(candidate)) {
+    if (/^(?:[A-Za-z]:[\\/]|[\\/]{2}[^.\\/?][^\\/]*[\\/][^\\/])/.test(candidate)) {
       return canonicalizeWin32FilesystemPath(candidate);
     }
 
@@ -310,10 +322,15 @@ export function sanitizePathEntries(
   const seen = new Set<string>();
 
   for (const rawEntry of entries) {
-    const unquoted =
-      platform === 'win32'
-        ? rawEntry.trim().replace(/^"(.*)"$/, '$1').trim()
-        : rawEntry.trim();
+    let unquoted = rawEntry.trim();
+    if (
+      platform === 'win32' &&
+      unquoted.length >= 2 &&
+      unquoted.startsWith('"') &&
+      unquoted.endsWith('"')
+    ) {
+      unquoted = unquoted.slice(1, -1).trim();
+    }
 
     if (unquoted.length === 0 || unquoted === '.' || unquoted === '..') {
       continue;

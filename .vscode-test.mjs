@@ -15,8 +15,17 @@ function resolveDarwinMacOsBin(macOsDir) {
     const candidate = path.join(macOsDir, name);
     if (fs.existsSync(candidate)) return candidate;
   }
-  const firstFile = fs.readdirSync(macOsDir, { withFileTypes: true }).find((e) => e.isFile());
-  return firstFile ? path.join(macOsDir, firstFile.name) : undefined;
+  for (const entry of fs.readdirSync(macOsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || entry.name.startsWith('.')) continue;
+    const candidate = path.join(macOsDir, entry.name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 function findCachedWorkspaceVsCode() {

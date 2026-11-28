@@ -168,7 +168,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src test scripts",
+    "lint": "eslint src test scripts .vscode-test.mjs",
     "check": "npm run typecheck && npm run lint",
     "compile-tests": "tsc -p tsconfig.test.json",
     "test:unit": "npm run compile-tests && node --test \"out-test/test/unit/*.test.js\"",

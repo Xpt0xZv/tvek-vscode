@@ -1,0 +1,31 @@
+name: Feature Request
+description: Propose an enhancement, command, or configuration option for tvek-vscode
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use Case
+      description: What workflow or problem would this feature address?
+      placeholder: When working with multi-root workspaces, I want to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed UX or Setting
+      description: Describe how the command, setting, status indicator, or editor integration should behave.
+      placeholder: Add a command or setting `tvek...` that...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any existing workarounds, editor settings, or alternative designs you considered.
+    validations:
+      required: false
