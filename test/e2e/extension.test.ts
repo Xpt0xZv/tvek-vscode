@@ -105,7 +105,11 @@ suite('tvek-vscode E2E Extension Host Suite', () => {
     api = ext.isActive ? ext.exports : await ext.activate();
 
     const snapshot = await api.waitForIdle();
-    assert.equal(snapshot.state, 'running', snapshot.lastError ?? undefined);
+    assert.equal(
+      snapshot.state,
+      'running',
+      snapshot.lastError ?? 'Expected tvek server to reach running state',
+    );
     assert.ok(snapshot.binary !== null);
   });
 

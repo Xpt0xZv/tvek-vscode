@@ -27,3 +27,24 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      eslint:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "typescript-eslint"
+          - "@typescript-eslint/*"
+      testing:
+        patterns:
+          - "mocha"
+          - "@types/mocha"
+          - "@vscode/test-*"
+    ignore:
+      # typescript-eslint v8 peerDependency requires typescript <6.0.0
+      - dependency-name: "typescript"
+        versions:
+          - ">= 6.0.0"
+      # Keep @types/node aligned with our Node 24 Active LTS (.nvmrc) runtime ceiling
+      - dependency-name: "@types/node"
+        versions:
+          - ">= 25.0.0"

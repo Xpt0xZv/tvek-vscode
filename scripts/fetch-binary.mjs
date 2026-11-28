@@ -772,9 +772,13 @@ export async function fetchOrStageBinary({
       fd = fs.openSync(resolvedLocal, fs.constants.O_RDONLY);
     } catch (err) {
       if (err && typeof err === 'object' && 'code' in err && err.code === 'EISDIR') {
-        throw new Error(`TVEK_LOCAL_BIN is not a regular file: "${resolvedLocal}".`);
+        throw new Error(`TVEK_LOCAL_BIN is not a regular file: "${resolvedLocal}".`, {
+          cause: err,
+        });
       }
-      throw new Error(`TVEK_LOCAL_BIN does not exist: "${resolvedLocal}".`);
+      throw new Error(`TVEK_LOCAL_BIN does not exist: "${resolvedLocal}".`, {
+        cause: err,
+      });
     }
     let payload;
     try {
