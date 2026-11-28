@@ -15,7 +15,7 @@
   },
   "homepage": "https://github.com/Xpt0xZv/tvek-vscode#readme",
   "engines": {
-    "vscode": "^1.90.0",
+    "vscode": "^1.91.0",
     "node": ">=20.0.0"
   },
   "categories": [
@@ -178,20 +178,20 @@
     "package:vsix": "vsce package --no-dependencies --skip-license"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^11.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.90.0",
-    "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1",
-    "@vscode/vsce": "^3.3.2",
-    "esbuild": "^0.25.1",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
     "eslint": "^10.15.0",
     "mocha": "^12.0.3",
-    "ovsx": "^0.10.1",
+    "ovsx": "^1.4.0",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.50.0"
   },

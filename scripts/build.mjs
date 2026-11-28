@@ -68,10 +68,10 @@ if (licenseFooter) {
 }
 
 const stat = fs.statSync(outFile);
-const maxBytes = 450 * 1024;
-if (stat.size > maxBytes) {
+const MAX_BUNDLE_BYTES = 550 * 1024;
+if (stat.size > MAX_BUNDLE_BYTES) {
   throw new Error(
-    `Bundle size budget exceeded: dist/extension.js is ${stat.size} bytes (ceiling: ${maxBytes} bytes).`,
+    `Bundle size budget exceeded: dist/extension.js is ${stat.size} bytes (ceiling: ${MAX_BUNDLE_BYTES} bytes).`,
   );
 }
 

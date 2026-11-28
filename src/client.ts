@@ -73,7 +73,7 @@ function getWorkspaceFolderPaths(): string[] {
 
 export class TvekClientManager {
   private readonly extensionPath: string;
-  private readonly outputChannel: vscode.OutputChannel;
+  private readonly outputChannel: vscode.LogOutputChannel;
   private readonly statusPresenter: LanguageStatusPresenter;
   private readonly coordinator = new ReloadCoordinator(150);
 
@@ -88,7 +88,7 @@ export class TvekClientManager {
 
   public constructor(
     extensionPath: string,
-    outputChannel: vscode.OutputChannel,
+    outputChannel: vscode.LogOutputChannel,
     statusPresenter: LanguageStatusPresenter,
   ) {
     this.extensionPath = extensionPath;
@@ -419,10 +419,10 @@ export class TvekClientManager {
   }
 
   private logInfo(message: string): void {
-    this.outputChannel.appendLine(`[INFO ${new Date().toISOString()}] ${message}`);
+    this.outputChannel.info(message);
   }
 
   private logError(message: string): void {
-    this.outputChannel.appendLine(`[ERROR ${new Date().toISOString()}] ${message}`);
+    this.outputChannel.error(message);
   }
 }
