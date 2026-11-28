@@ -22,6 +22,8 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "UTC"
+    cooldown:
+      default-days: 3
     open-pull-requests-limit: 5
     labels:
       - "dependencies"

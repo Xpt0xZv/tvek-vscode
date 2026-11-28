@@ -10,7 +10,9 @@ let activeManager: TvekClientManager | null = null;
 export async function activate(
   context: vscode.ExtensionContext,
 ): Promise<TvekExtensionApi> {
-  const outputChannel = vscode.window.createOutputChannel('tvek');
+  const outputChannel = vscode.window.createOutputChannel('tvek', {
+    log: true,
+  });
   const statusPresenter = new LanguageStatusPresenter();
   const manager = new TvekClientManager(
     context.extensionPath,
