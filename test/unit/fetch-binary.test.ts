@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -366,7 +367,13 @@ describe('fetch-binary supply-chain & archive security invariants', () => {
       false,
     );
     assert.equal(mod.isAllowedDownloadUrl('https://evil.example.com/tvek.zip'), false);
+    assert.equal(mod.isAllowedDownloadUrl('https://github.com.evil.example.com/tvek.zip'), false);
+    assert.equal(
+      mod.isAllowedDownloadUrl('https://evil.example.com/https://github.com/tvek.zip'),
+      false,
+    );
     assert.equal(mod.isAllowedDownloadUrl('https://evilgithub.com/payload.zip'), false);
+    assert.equal(mod.isAllowedDownloadUrl('https://notgithubusercontent.com/payload.zip'), false);
     assert.equal(mod.isAllowedDownloadUrl('https://githubusercontent.com/payload.zip'), false);
     assert.equal(mod.isAllowedDownloadUrl('https://user:pass@github.com/Xpt0xZv/tvek'), false);
 
@@ -436,7 +443,7 @@ describe('fetch-binary supply-chain & archive security invariants', () => {
         /Blocked download URL "https:\/\/evil\.example\.com\/malicious\.zip"/,
       );
       assert.ok(
-        !requestedUrls.some((u) => u.includes('evil.example.com')),
+        !requestedUrls.some((u) => new URL(u).hostname === 'evil.example.com'),
         'Must never connect to disallowed redirect host',
       );
 
@@ -814,6 +821,165 @@ describe('fetch-binary supply-chain & archive security invariants', () => {
         'Stale cross-platform sibling binary must be cleaned up when restaging',
       );
       assert.deepEqual(fs.readFileSync(stagedLinux.destPath), localBytes);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('enforces single-fd TVEK_LOCAL_BIN partial/truncated read invariants, in-memory release staging, and CLI CRLF log-injection stripping', async () => {
+    const mod = await loadFetchModule();
+    const scriptPath = path.resolve(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      'scripts',
+      'fetch-binary.mjs',
+    );
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tvek-codeql-adv-'));
+    const outDir = path.join(tmpRoot, 'bundled', 'bin');
+
+    try {
+      // 1. Directory with trailing path separator rejected cleanly
+      await assert.rejects(
+        () =>
+          mod.fetchOrStageBinary({
+            target: 'linux-x64',
+            outDir,
+            localBin: `${tmpRoot}${path.sep}`,
+          }),
+        /TVEK_LOCAL_BIN is not a regular file/,
+      );
+
+      // 2. POSIX/FS EISDIR thrown directly by fs.openSync -> mapped to "is not a regular file"
+      const openMock = mock.method(fs, 'openSync', () => {
+        const eisdir = Object.assign(new Error('EISDIR: illegal operation on a directory'), {
+          code: 'EISDIR',
+        });
+        throw eisdir;
+      });
+      try {
+        await assert.rejects(
+          () =>
+            mod.fetchOrStageBinary({
+              target: 'linux-x64',
+              outDir,
+              localBin: path.join(tmpRoot, 'some-dir'),
+            }),
+          /TVEK_LOCAL_BIN is not a regular file/,
+        );
+      } finally {
+        openMock.mock.restore();
+      }
+
+      // 3. Chunked short reads on single fd reassemble full binary payload without corruption
+      const localBinPath = path.join(tmpRoot, 'chunked-local-tvek');
+      const expectedLocal = Buffer.from('0123456789abcdef-single-fd-payload', 'utf8');
+      fs.writeFileSync(localBinPath, expectedLocal);
+
+      const realReadSync = fs.readSync.bind(fs);
+      const chunkedReadMock = mock.method(
+        fs,
+        'readSync',
+        (
+          fd: number,
+          buffer: NodeJS.ArrayBufferView,
+          offset: number,
+          length: number,
+          position: fs.ReadPosition | null,
+        ): number => realReadSync(fd, buffer, offset, Math.min(length, 5), position),
+      );
+      try {
+        const chunkedResult = await mod.fetchOrStageBinary({
+          target: 'win32-x64',
+          outDir,
+          localBin: localBinPath,
+        });
+        assert.deepEqual(fs.readFileSync(chunkedResult.destPath), expectedLocal);
+      } finally {
+        chunkedReadMock.mock.restore();
+      }
+
+      // 4. Mid-read concurrent truncation (EOF before fstatSync size) fails closed without staging
+      const truncatedOutDir = path.join(tmpRoot, 'truncated-out');
+      const truncatedReadMock = mock.method(fs, 'readSync', (): number => 0);
+      try {
+        await assert.rejects(
+          () =>
+            mod.fetchOrStageBinary({
+              target: 'win32-x64',
+              outDir: truncatedOutDir,
+              localBin: localBinPath,
+            }),
+          /TVEK_LOCAL_BIN truncated during read/,
+        );
+        assert.equal(fs.existsSync(truncatedOutDir), false);
+      } finally {
+        truncatedReadMock.mock.restore();
+      }
+
+      // 5. In-memory verified release download stages cleanly without temporary archive files
+      const releaseOutDir = path.join(tmpRoot, 'release-out');
+      const releaseBinary = Buffer.from('MZ-in-memory-verified-014', 'utf8');
+      const releaseZip = buildZip(mod.computeCrc32, [
+        { name: 'tvek-x86_64-pc-windows-msvc/tvek.exe', data: releaseBinary },
+      ]);
+      const releaseSha = crypto.createHash('sha256').update(releaseZip).digest('hex');
+
+      const stagedRelease = await mod.fetchOrStageBinary({
+        target: 'win32-x64',
+        version: '0.1.4',
+        outDir: releaseOutDir,
+        localBin: '',
+        downloadFn: async (url: string) => {
+          if (url.endsWith('/SHA256SUMS')) {
+            return Buffer.from(
+              `${releaseSha}  tvek-x86_64-pc-windows-msvc.zip\n`,
+              'utf8',
+            );
+          }
+          return releaseZip;
+        },
+      });
+      assert.equal(stagedRelease.source, 'release');
+      assert.equal(stagedRelease.sha256, releaseSha);
+      assert.deepEqual(fs.readFileSync(stagedRelease.destPath), releaseBinary);
+
+      // 6. CLI entrypoint strips \r and \n from error messages and staged output (js/log-injection)
+      const crlfTargetRun = spawnSync(
+        process.execPath,
+        [scriptPath, '--target=win32-x64\r\n[fetch-binary] Staged forged-entry'],
+        { encoding: 'utf8', env: { ...process.env, TVEK_LOCAL_BIN: '' } },
+      );
+      assert.equal(crlfTargetRun.status, 1);
+      const targetErrLines = crlfTargetRun.stderr.trimEnd().split(/\r?\n/);
+      assert.equal(
+        targetErrLines.length,
+        1,
+        'CRLF injection in --target must be collapsed onto a single stderr line',
+      );
+      assert.match(targetErrLines[0] ?? '', /^\[fetch-binary\] ERROR: Unsupported target/);
+      assert.ok((targetErrLines[0] ?? '').includes('Staged forged-entry'));
+
+      const crlfArgRun = spawnSync(
+        process.execPath,
+        [scriptPath, '--unknown\nFORGED_LOG_LINE\r\nSECOND_FORGED_LINE'],
+        { encoding: 'utf8', env: { ...process.env, TVEK_LOCAL_BIN: '' } },
+      );
+      assert.equal(crlfArgRun.status, 1);
+      assert.equal(crlfArgRun.stderr.trimEnd().split(/\r?\n/).length, 1);
+
+      const cliOutDir = path.join(tmpRoot, 'cli-out');
+      const cliOkRun = spawnSync(
+        process.execPath,
+        [scriptPath, '--target=win32-x64', `--out-dir=${cliOutDir}`],
+        { encoding: 'utf8', env: { ...process.env, TVEK_LOCAL_BIN: localBinPath } },
+      );
+      assert.equal(cliOkRun.status, 0);
+      const stdoutLines = cliOkRun.stdout.trimEnd().split(/\r?\n/);
+      assert.equal(stdoutLines.length, 1);
+      assert.match(stdoutLines[0] ?? '', /^Staged tvek \(local, target=win32-x64, source=local\) -> /);
+      assert.deepEqual(fs.readFileSync(path.join(cliOutDir, 'tvek.exe')), expectedLocal);
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }

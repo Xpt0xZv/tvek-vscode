@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import https from 'node:https';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import zlib from 'node:zlib';
@@ -725,9 +724,7 @@ function stageBinaryBufferAtomically(payload, outDir, targetInfo) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const staleSibling = path.join(outDir, targetInfo.isWindows ? 'tvek' : 'tvek.exe');
-  if (fs.existsSync(staleSibling)) {
-    fs.rmSync(staleSibling, { force: true });
-  }
+  fs.rmSync(staleSibling, { force: true });
 
   const destPath = path.join(outDir, targetInfo.binaryName);
   const tmpName = `.${targetInfo.binaryName}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
@@ -770,19 +767,41 @@ export async function fetchOrStageBinary({
 
   if (typeof localBin === 'string' && localBin.trim() !== '') {
     const resolvedLocal = path.resolve(localBin.trim());
-    let stat;
+    let fd;
     try {
-      stat = fs.statSync(resolvedLocal);
-    } catch {
+      fd = fs.openSync(resolvedLocal, fs.constants.O_RDONLY);
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'EISDIR') {
+        throw new Error(`TVEK_LOCAL_BIN is not a regular file: "${resolvedLocal}".`);
+      }
       throw new Error(`TVEK_LOCAL_BIN does not exist: "${resolvedLocal}".`);
     }
-    if (!stat.isFile()) {
-      throw new Error(`TVEK_LOCAL_BIN is not a regular file: "${resolvedLocal}".`);
+    let payload;
+    try {
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile()) {
+        throw new Error(`TVEK_LOCAL_BIN is not a regular file: "${resolvedLocal}".`);
+      }
+      if (stat.size === 0 || stat.size > MAX_UNCOMPRESSED_BYTES) {
+        throw new Error(`TVEK_LOCAL_BIN has invalid file size (${stat.size} bytes).`);
+      }
+      payload = Buffer.allocUnsafe(stat.size);
+      let totalRead = 0;
+      while (totalRead < stat.size) {
+        const bytesRead = fs.readSync(fd, payload, totalRead, stat.size - totalRead, totalRead);
+        if (bytesRead === 0) {
+          break;
+        }
+        totalRead += bytesRead;
+      }
+      if (totalRead !== stat.size) {
+        throw new Error(
+          `TVEK_LOCAL_BIN truncated during read: expected ${stat.size} bytes, got ${totalRead} bytes.`,
+        );
+      }
+    } finally {
+      fs.closeSync(fd);
     }
-    if (stat.size === 0 || stat.size > MAX_UNCOMPRESSED_BYTES) {
-      throw new Error(`TVEK_LOCAL_BIN has invalid file size (${stat.size} bytes).`);
-    }
-    const payload = fs.readFileSync(resolvedLocal);
     const destPath = stageBinaryBufferAtomically(payload, outDir, targetInfo);
     return {
       destPath,
@@ -797,45 +816,34 @@ export async function fetchOrStageBinary({
   const sumsUrl = `${baseUrl}/SHA256SUMS`;
   const archiveUrl = `${baseUrl}/${targetInfo.archive}`;
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvek-fetch-'));
-  try {
-    const [sumsBytes, archiveBytes] = await Promise.all([
-      downloadFn(sumsUrl),
-      downloadFn(archiveUrl),
-    ]);
+  const [sumsBytes, archiveBytes] = await Promise.all([
+    downloadFn(sumsUrl),
+    downloadFn(archiveUrl),
+  ]);
 
-    const sumsPath = path.join(tmpDir, 'SHA256SUMS');
-    const archivePath = path.join(tmpDir, targetInfo.archive);
-    fs.writeFileSync(sumsPath, sumsBytes);
-    fs.writeFileSync(archivePath, archiveBytes);
-
-    const sumsMap = parseSha256Sums(sumsBytes.toString('utf8'));
-    const expectedSha256 = sumsMap.get(targetInfo.archive);
-    if (!expectedSha256) {
-      throw new Error(
-        `Archive "${targetInfo.archive}" was not listed in SHA256SUMS for v${resolvedVer}.`,
-      );
-    }
-
-    const rawArchiveOnDisk = fs.readFileSync(archivePath);
-    verifySha256(rawArchiveOnDisk, expectedSha256);
-
-    const binaryBytes =
-      targetInfo.format === 'zip'
-        ? extractZipEntry(rawArchiveOnDisk, targetInfo.entry)
-        : extractTarGzEntry(rawArchiveOnDisk, targetInfo.entry);
-
-    const destPath = stageBinaryBufferAtomically(binaryBytes, outDir, targetInfo);
-    return {
-      destPath,
-      target: targetInfo.target,
-      version: resolvedVer,
-      sha256: expectedSha256,
-      source: 'release',
-    };
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+  const sumsMap = parseSha256Sums(sumsBytes.toString('utf8'));
+  const expectedSha256 = sumsMap.get(targetInfo.archive);
+  if (!expectedSha256) {
+    throw new Error(
+      `Archive "${targetInfo.archive}" was not listed in SHA256SUMS for v${resolvedVer}.`,
+    );
   }
+
+  verifySha256(archiveBytes, expectedSha256);
+
+  const binaryBytes =
+    targetInfo.format === 'zip'
+      ? extractZipEntry(archiveBytes, targetInfo.entry)
+      : extractTarGzEntry(archiveBytes, targetInfo.entry);
+
+  const destPath = stageBinaryBufferAtomically(binaryBytes, outDir, targetInfo);
+  return {
+    destPath,
+    target: targetInfo.target,
+    version: resolvedVer,
+    sha256: expectedSha256,
+    source: 'release',
+  };
 }
 
 function parseCliArgs(argv) {
@@ -886,11 +894,15 @@ if (isMainModule) {
   try {
     const cliOptions = parseCliArgs(process.argv.slice(2));
     const result = await fetchOrStageBinary(cliOptions);
+    const safeVersion = String(result.version).replace(/[\r\n]/g, ' ');
+    const safeTarget = String(result.target).replace(/[\r\n]/g, ' ');
+    const safeSource = String(result.source).replace(/[\r\n]/g, ' ');
+    const safeDestPath = String(result.destPath).replace(/[\r\n]/g, ' ');
     console.log(
-      `Staged tvek (${result.version}, target=${result.target}, source=${result.source}) -> ${result.destPath}`,
+      `Staged tvek (${safeVersion}, target=${safeTarget}, source=${safeSource}) -> ${safeDestPath}`,
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = (err instanceof Error ? err.message : String(err)).replace(/[\r\n]/g, ' ');
     console.error(`[fetch-binary] ERROR: ${message}`);
     process.exitCode = 1;
   }
