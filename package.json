@@ -189,7 +189,7 @@
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.3.2",
     "esbuild": "^0.25.1",
-    "eslint": "^9.22.0",
+    "eslint": "^10.15.0",
     "mocha": "^11.1.0",
     "ovsx": "^0.10.1",
     "typescript": "^5.8.2",
