@@ -129,7 +129,7 @@ export const defaultProbeVersion: VersionProbeFn = ({
     );
   });
 
-function pathModuleFor(platform: NodeJS.Platform): path.PlatformPath {
+function pathModuleFor(platform: NodeJS.Platform): typeof path.posix {
   return platform === 'win32' ? path.win32 : path.posix;
 }
 
